@@ -7,7 +7,7 @@ Casos de prueba (CP) de la matriz de trazabilidad del informe, con la prueba aut
 
 Ejecución del 12/10/2026 (Sprint 1): **38/38 pruebas unitarias y de API aprobadas** y **12/12 pruebas e2e aprobadas**.
 
-Ejecución del 20/11/2026 (Sprint 3, con HU13): **67/67 pruebas unitarias y de API aprobadas** y **17/17 pruebas e2e aprobadas**.
+Ejecución del 20/11/2026 (Sprint 3, con HU13, HU11 y HU12): **75/75 pruebas unitarias y de API aprobadas** y **18/18 pruebas e2e aprobadas**.
 
 | CP | Historia | Caso de prueba | Prueba de API (`tests/api`) | Prueba e2e (`tests/e2e`) | Resultado |
 |---|---|---|---|---|---|
@@ -32,12 +32,16 @@ Ejecución del 20/11/2026 (Sprint 3, con HU13): **67/67 pruebas unitarias y de A
 | CP14c | HU07 | Redondeo a favor del cliente en efectivo | `rf03-ventas` · CP14c | CP14c | Aprobado |
 | CP18 | HU08 | Listado de ventas del día | `rf03-historial` · CP18 | CP18 | Aprobado |
 | CP19 | HU08 | Total vendido del día | `rf03-historial` · CP19 | CP19 | Aprobado |
+| CP24 | HU11 | Registro de venta al fiado (deuda exacta, sin redondeo; solo el dueño) | `rf06-fiados` · CP24 | CP24 | Aprobado |
+| CP25 | HU11 | Registro de pago de deuda e historial del cliente | `rf06-fiados` · CP25 | CP25 | Aprobado |
+| CP26 | HU12 | Recordatorio por WhatsApp con el número y el monto | `rf06-fiados` · CP26 y prueba unitaria `whatsapp` | CP26 | Aprobado |
+| CP27 | HU12 | Cliente sin celular: botón deshabilitado y celular válido | `rf06-fiados` · CP27 | CP27 | Aprobado |
 | CP28 | HU13 | Alerta de lotes por vencer (días configurables) | `rf07-vencimientos` · CP28 | CP28 | Aprobado |
 | CP29 | HU13 | Registro de lote vencido como merma | `rf07-vencimientos` · CP29 | CP29 | Aprobado |
 | CP30 | HU14 | Configuración de stock mínimo | `rf07-alertas` · CP30 | CP30 | Aprobado |
 | CP31 | HU14 | Alerta de stock bajo | `rf07-alertas` · CP31 | CP31 | Aprobado |
 
-Además, `tests/unit/validaciones.test.ts` tiene 20 pruebas unitarias de las reglas de los formularios (contraseña, precios, fechas en hora de Lima, cantidades enteras, mensajes de error).
+Además, `tests/unit/validaciones.test.ts` tiene 25 pruebas unitarias de las reglas de los formularios (contraseña, precios, fechas en hora de Lima, cantidades enteras, mensajes de error, clientes y pagos de fiado); `tests/unit/alertas.test.ts` tiene 7 y `tests/unit/whatsapp.test.ts` tiene 2 (enlace del recordatorio de HU12).
 
 ## Verificación de que las pruebas detectan errores
 
@@ -50,12 +54,17 @@ Para comprobar que las pruebas no pasan "por defecto", se introdujeron defectos 
 | La alerta de stock bajo compara con "menor que" en lugar de "menor o igual que" el mínimo (Sprint 2) | CP31 y la prueba unitaria de HU14 fallaron |
 | El día del historial se calcula en hora UTC y no en hora de Lima (Sprint 2) | CP18, CP19 y la prueba unitaria de HU08 fallaron |
 | La merma no descuenta el lote vencido (Sprint 3) | CP29 falló |
+| La deuda del cliente no resta los pagos registrados (Sprint 3) | CP25 falló |
+| El enlace de WhatsApp se arma sin el código de país 51 (Sprint 3) | Prueba unitaria de HU12 falló |
 
 ## Defectos encontrados durante el sprint
+
+BUG-02 a BUG-04 están en el informe (pruebas manuales del Sprint 2).
 
 | ID | Descripción | Detectado por | Estado |
 |---|---|---|---|
 | BUG-01 | En "Nuevo producto", si había un error de validación (por ejemplo, precio 0), la categoría elegida se borraba al volver a mostrar el formulario (comportamiento de React 19 con `<select>`). | e2e CP10 | Corregido: el formulario se vuelve a montar con los valores escritos (productos, mercadería y equipo). |
+| BUG-05 | (Sprint 3) El cuaderno de fiados daba "permiso denegado" al dueño: la vista `v_clientes` llamaba a una función interna de la base de datos que no está expuesta a los usuarios. | API CP24 y CP25 | Corregido antes del commit: la deuda se calcula dentro de la vista y la función queda solo para uso interno (si se expusiera, con un id ajeno revelaría la deuda de otra bodega). |
 
 ## Checklist CHK-01 (HT01)
 

@@ -321,18 +321,19 @@ test.describe.serial('Sprint 1 · flujo completo', () => {
     const menu = page.getByRole('navigation', { name: 'Menú principal' }).first();
     await expect(menu.getByRole('link', { name: 'Vender' })).toBeVisible();
     await expect(menu.getByRole('link', { name: 'Stock' })).toBeVisible();
-    for (const oculto of ['Productos', 'Mercadería', 'Equipo', 'Ventas', 'Vencimientos']) await expect(menu.getByRole('link', { name: oculto })).toHaveCount(0);
+    for (const oculto of ['Productos', 'Mercadería', 'Equipo', 'Ventas', 'Vencimientos', 'Fiados']) await expect(menu.getByRole('link', { name: oculto })).toHaveCount(0);
     await captura(page, '13-panel-ayudante');
 
     // Escribir la dirección a mano tampoco abre las pantallas del dueño
-    for (const ruta of ['/app/productos', '/app/productos/nuevo', '/app/mercaderia', '/app/equipo', '/app/ventas', '/app/vencimientos']) {
+    for (const ruta of ['/app/productos', '/app/productos/nuevo', '/app/mercaderia', '/app/equipo', '/app/ventas', '/app/vencimientos', '/app/fiados', '/app/fiados/1']) {
       await page.goto(ruta);
       await expect(page).toHaveURL(/\/app\?restringido=1/);
     }
     await expect(page.getByText('Esa opción solo está disponible para el dueño de la bodega.')).toBeVisible();
 
-    // Sí puede vender
+    // Sí puede vender, pero no al fiado (HU11: solo el dueño fía)
     await page.goto('/app/vender');
+    await expect(page.getByLabel('Método de pago').locator('option[value="fiado"]')).toHaveCount(0);
     await page.getByRole('button', { name: 'Agregar Galletas Soda Field', exact: true }).click();
     await page.getByRole('button', { name: 'Confirmar venta' }).click();
     await expect(page.getByTestId('venta-ok')).toBeVisible();
@@ -356,6 +357,86 @@ test.describe.serial('Sprint 1 · flujo completo', () => {
     // El día anterior no tiene ventas
     await page.getByRole('link', { name: '← Día anterior' }).click();
     await expect(page.getByText('No hay ventas registradas este día.')).toBeVisible();
+  });
+
+  test('CP24, CP25, CP26, CP27 Cuaderno de fiados y recordatorio por WhatsApp (HU11, HU12)', async ({ page }) => {
+    await ingresar(page, DUENO.email, DUENO.password);
+    await page.getByRole('link', { name: /Cuaderno de fiados/ }).click();
+    await expect(page).toHaveURL(/\/app\/fiados$/);
+
+    // Clientes del cuaderno: uno con celular y otro sin celular
+    for (const c of [{ nombre: 'Carmen Rojas', celular: '987 654 321' }, { nombre: 'Pedro Huamán', celular: '' }]) {
+      await page.getByLabel('Nombre').fill(c.nombre);
+      await page.getByLabel('Celular (opcional)').fill(c.celular);
+      await page.getByRole('button', { name: 'Agregar cliente' }).click();
+      await expect(page.getByText(`${c.nombre} ya está en tu cuaderno de fiados.`)).toBeVisible();
+    }
+    await page.getByLabel('Nombre').fill('carmen rojas');
+    await page.getByRole('button', { name: 'Agregar cliente' }).click();
+    await expect(page.getByText('Ya tienes un cliente con ese nombre.')).toBeVisible();
+
+    // CP24: venta al fiado de 2 Inca Kola + 1 galleta = 8,20 (sin redondeo)
+    await page.goto('/app/vender');
+    await page.getByRole('button', { name: 'Agregar Inca Kola 500 ml', exact: true }).click();
+    await page.getByRole('button', { name: 'Agregar Inca Kola 500 ml', exact: true }).click();
+    await page.getByRole('button', { name: 'Agregar Galletas Soda Field', exact: true }).click();
+    await page.getByLabel('Método de pago').selectOption('fiado');
+    await expect(page.getByRole('button', { name: 'Confirmar venta' })).toBeDisabled(); // falta elegir al cliente
+    await page.getByLabel('Cliente').selectOption({ label: 'Carmen Rojas' });
+    await expect(page.getByText('Total al fiado')).toBeVisible();
+    await expect(page.getByTestId('venta-total')).toHaveText(/8\.20/);
+    await captura(page, '21-venta-fiado');
+    await page.getByRole('button', { name: 'Confirmar venta' }).click();
+    await expect(page.getByTestId('venta-ok')).toContainText('Fiado a Carmen Rojas');
+    await expect(page.getByTestId('venta-ok')).toContainText(/Ahora debe S\/\s8\.20/);
+
+    // El cuaderno muestra quién debe y cuánto
+    await page.goto('/app/fiados');
+    await expect(page.getByTestId('total-por-cobrar')).toHaveText(/8\.20/);
+    const filas = page.getByTestId('lista-clientes').getByRole('listitem');
+    const carmen = filas.filter({ hasText: 'Carmen Rojas' });
+    const pedro = filas.filter({ hasText: 'Pedro Huamán' });
+    await expect(carmen.getByTestId('deuda-cliente')).toHaveText(/Debe S\/\s8\.20/);
+    await expect(pedro.getByTestId('deuda-cliente')).toHaveText('Al día');
+
+    // CP26: el botón abre WhatsApp con el número y el mensaje de la deuda ya escritos
+    const recordar = carmen.getByRole('link', { name: 'Recordar a Carmen Rojas por WhatsApp' });
+    const enlace = new URL((await recordar.getAttribute('href'))!);
+    expect(enlace.origin + enlace.pathname).toBe('https://wa.me/51987654321');
+    expect(enlace.searchParams.get('text')!.replace(/\s/g, ' ')).toContain('cuenta pendiente de S/ 8.20');
+    await expect(recordar).toHaveAttribute('target', '_blank');
+    // CP27: sin celular el botón está deshabilitado
+    await expect(pedro.getByRole('button', { name: /Recordar a Pedro Huamán/ })).toBeDisabled();
+    await page.screenshot({ path: 'docs/capturas/22-fiados.png', fullPage: true });
+
+    // CP25: pago parcial de la deuda
+    await carmen.getByRole('link', { name: /Carmen Rojas/ }).first().click();
+    await expect(page).toHaveURL(/\/app\/fiados\/\d+$/);
+    await expect(page.getByTestId('deuda-actual')).toHaveText(/8\.20/);
+    await page.getByLabel('Monto que paga (S/)').fill('10');
+    await page.getByRole('button', { name: 'Registrar pago' }).click();
+    await expect(page.getByText('El pago no puede ser mayor que la deuda (S/ 8.20).')).toBeVisible();
+    await page.getByLabel('Monto que paga (S/)').fill('5');
+    await page.getByLabel('Cómo pagó').selectOption('yape');
+    await page.getByRole('button', { name: 'Registrar pago' }).click();
+    await expect(page.getByTestId('pago-ok')).toContainText(/Carmen Rojas aún debe S\/\s3\.20/);
+    await expect(page.getByTestId('deuda-actual')).toHaveText(/3\.20/);
+    const historial = page.getByTestId('historial-cliente').getByRole('listitem');
+    await expect(historial).toHaveCount(2);
+    await expect(historial.first()).toContainText('Pagó con Yape'); // lo más reciente arriba
+    await expect(historial.last()).toContainText('2 × Inca Kola 500 ml');
+    await page.screenshot({ path: 'docs/capturas/23-fiado-cliente.png', fullPage: true });
+
+    // CP27: el celular, si se registra, debe ser válido
+    await page.goto('/app/fiados');
+    await pedro.getByRole('link', { name: /Pedro Huamán/ }).first().click();
+    await page.getByLabel('Celular del cliente').fill('12345');
+    await page.getByRole('button', { name: 'Guardar celular' }).click();
+    await expect(page.getByText('El celular debe tener 9 dígitos y empezar con 9.')).toBeVisible();
+    await page.getByLabel('Celular del cliente').fill('912 345 678');
+    await page.getByRole('button', { name: 'Guardar celular' }).click();
+    await expect(page.getByText('Celular guardado.')).toBeVisible();
+    await expect(page.getByText('Celular 912345678')).toBeVisible();
   });
 
   test('Vista móvil de la venta', async ({ browser }) => {
