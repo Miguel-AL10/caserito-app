@@ -7,7 +7,7 @@ Casos de prueba (CP) de la matriz de trazabilidad del informe, con la prueba aut
 
 Ejecución del 12/10/2026 (Sprint 1): **38/38 pruebas unitarias y de API aprobadas** y **12/12 pruebas e2e aprobadas**.
 
-Ejecución del 20/11/2026 (Sprint 3, con HU13, HU11 y HU12): **75/75 pruebas unitarias y de API aprobadas** y **18/18 pruebas e2e aprobadas**.
+Ejecución del 20/11/2026 (Sprint 3, con HU13, HU11, HU12 y HU09): **85/85 pruebas unitarias y de API aprobadas** y **19/19 pruebas e2e aprobadas**.
 
 | CP | Historia | Caso de prueba | Prueba de API (`tests/api`) | Prueba e2e (`tests/e2e`) | Resultado |
 |---|---|---|---|---|---|
@@ -32,6 +32,8 @@ Ejecución del 20/11/2026 (Sprint 3, con HU13, HU11 y HU12): **75/75 pruebas uni
 | CP14c | HU07 | Redondeo a favor del cliente en efectivo | `rf03-ventas` · CP14c | CP14c | Aprobado |
 | CP18 | HU08 | Listado de ventas del día | `rf03-historial` · CP18 | CP18 | Aprobado |
 | CP19 | HU08 | Total vendido del día | `rf03-historial` · CP19 | CP19 | Aprobado |
+| CP20 | HU09 | Interpretación de venta dictada (venta propuesta; nada se registra sin confirmar) | Prueba unitaria `voz` · CA1 | CP20 | Aprobado |
+| CP21 | HU09 | Producto no reconocido en el dictado (se elige a mano) | Prueba unitaria `voz` · CA2 | CP21 | Aprobado |
 | CP24 | HU11 | Registro de venta al fiado (deuda exacta, sin redondeo; solo el dueño) | `rf06-fiados` · CP24 | CP24 | Aprobado |
 | CP25 | HU11 | Registro de pago de deuda e historial del cliente | `rf06-fiados` · CP25 | CP25 | Aprobado |
 | CP26 | HU12 | Recordatorio por WhatsApp con el número y el monto | `rf06-fiados` · CP26 y prueba unitaria `whatsapp` | CP26 | Aprobado |
@@ -41,7 +43,9 @@ Ejecución del 20/11/2026 (Sprint 3, con HU13, HU11 y HU12): **75/75 pruebas uni
 | CP30 | HU14 | Configuración de stock mínimo | `rf07-alertas` · CP30 | CP30 | Aprobado |
 | CP31 | HU14 | Alerta de stock bajo | `rf07-alertas` · CP31 | CP31 | Aprobado |
 
-Además, `tests/unit/validaciones.test.ts` tiene 25 pruebas unitarias de las reglas de los formularios (contraseña, precios, fechas en hora de Lima, cantidades enteras, mensajes de error, clientes y pagos de fiado); `tests/unit/alertas.test.ts` tiene 7 y `tests/unit/whatsapp.test.ts` tiene 2 (enlace del recordatorio de HU12).
+Además, `tests/unit/validaciones.test.ts` tiene 25 pruebas unitarias de las reglas de los formularios (contraseña, precios, fechas en hora de Lima, cantidades enteras, mensajes de error, clientes y pagos de fiado); `tests/unit/alertas.test.ts` tiene 7 `tests/unit/whatsapp.test.ts` tiene 2 (enlace del recordatorio de HU12) y `tests/unit/voz.test.ts` tiene 10 (interpretación del dictado de HU09: presentaciones, cantidades a granel, productos ambiguos o no reconocidos).
+
+En la prueba e2e de HU09 el navegador de pruebas no tiene micrófono, así que se reemplaza el reconocedor de voz del navegador (Web Speech API) por uno simulado que entrega el texto dictado; el resto del flujo es el real.
 
 ## Verificación de que las pruebas detectan errores
 
@@ -56,6 +60,8 @@ Para comprobar que las pruebas no pasan "por defecto", se introdujeron defectos 
 | La merma no descuenta el lote vencido (Sprint 3) | CP29 falló |
 | La deuda del cliente no resta los pagos registrados (Sprint 3) | CP25 falló |
 | El enlace de WhatsApp se arma sin el código de país 51 (Sprint 3) | Prueba unitaria de HU12 falló |
+| El intérprete de voz no traduce "medio litro" a "500 ml" (Sprint 3) | 3 pruebas unitarias de HU09 fallaron |
+| La venta por voz se puede confirmar con un producto sin elegir (Sprint 3) | e2e CP21 falló |
 
 ## Defectos encontrados durante el sprint
 
