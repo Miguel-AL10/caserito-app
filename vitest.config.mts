@@ -4,9 +4,9 @@ import path from 'node:path';
 export default defineConfig({
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, 'src'),
+      '@': path.resolve(import.meta.dirname, 'src'),
       // En Next.js "server-only" es un módulo vacío en el servidor; en las pruebas también
-      'server-only': path.resolve(__dirname, 'node_modules/server-only/empty.js'),
+      'server-only': path.resolve(import.meta.dirname, 'node_modules/server-only/empty.js'),
     },
   },
   test: {

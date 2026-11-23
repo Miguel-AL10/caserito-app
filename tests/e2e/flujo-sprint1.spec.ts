@@ -562,6 +562,46 @@ test.describe.serial('Sprint 1 · flujo completo', () => {
     await page.screenshot({ path: 'docs/capturas/27-asistente.png', fullPage: true });
   });
 
+  test('CP22, CP23 Carga de mercadería con foto de factura (HU10)', async ({ page }) => {
+    const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false } });
+    const { data: bodega } = await admin.from('bodegas').select('id').eq('nombre', BODEGA).single();
+    const contarLotes = async () => (await admin.from('lotes').select('id', { count: 'exact', head: true }).eq('bodega_id', bodega!.id)).count!;
+    const antes = await contarLotes();
+    const enDias = (n: number) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima' }).format(new Date(Date.now() + n * 86_400_000));
+
+    await ingresar(page, DUENO.email, DUENO.password);
+    await page.goto('/app/mercaderia');
+    await page.getByRole('link', { name: 'Cargar con foto de factura' }).click();
+    await expect(page).toHaveURL(/\/app\/mercaderia\/factura$/);
+    await page.getByLabel('Foto de la factura').setInputFiles('tests/fixtures/factura-ejemplo.jpg');
+    await expect(page.getByAltText('Vista previa de la factura')).toBeVisible();
+    await page.getByRole('button', { name: 'Leer factura con IA' }).click();
+
+    // CA1: la lista leída (Gemini simulado) para revisar
+    const filas = page.getByTestId('filas-factura').getByRole('listitem');
+    await expect(filas).toHaveCount(3);
+    await expect(page.getByLabel('Producto de «INCA KOLA 500ML PET»')).toHaveValue(/\d+/);
+    await expect(page.getByLabel('Producto de «INCA KOLA 500ML PET»').locator('option:checked')).toHaveText('Inca Kola 500 ml');
+    await expect(page.getByLabel('Cantidad de «INCA KOLA 500ML PET»')).toHaveValue('12');
+    await expect(page.getByLabel('Costo unitario de «INCA KOLA 500ML PET»')).toHaveValue('2.1');
+    await expect(page.getByLabel('Producto de «GALLETA SODA FIELD X6»').locator('option:checked')).toHaveText('Galletas Soda Field');
+    // CA2: lo que no está en el catálogo empieza sin marcar; solo se registra lo marcado
+    await expect(page.getByLabel('Agregar «PAPEL HIGIENICO ELITE»')).not.toBeChecked();
+    await expect(filas.filter({ hasText: 'PAPEL HIGIENICO ELITE' })).toContainText('No está en tu catálogo');
+    await page.screenshot({ path: 'docs/capturas/28-factura.png', fullPage: true });
+
+    // CA2: cada lote necesita su fecha de vencimiento (la galleta no la trae)
+    await page.getByRole('button', { name: 'Registrar 2 lotes' }).click();
+    await expect(filas.filter({ hasText: 'GALLETA SODA FIELD X6' }).getByRole('alert')).toHaveText('Elige la fecha de vencimiento.');
+    expect(await contarLotes()).toBe(antes); // no se guardó nada
+    await page.getByLabel('Vencimiento de «GALLETA SODA FIELD X6»').fill(enDias(45));
+    await page.getByRole('button', { name: 'Registrar 2 lotes' }).click();
+    await expect(page.getByTestId('factura-ok')).toHaveText('Se agregaron 2 lotes al inventario.');
+    expect(await contarLotes()).toBe(antes + 2);
+    const { data: nuevos } = await admin.from('lotes').select('cantidad_inicial, costo_unitario, fecha_vencimiento').eq('bodega_id', bodega!.id).order('id', { ascending: false }).limit(2);
+    expect(nuevos!.map((l) => [Number(l.cantidad_inicial), Number(l.costo_unitario)]).sort()).toEqual([[12, 2.1], [24, 0.55]]);
+  });
+
   test('Vista móvil de la venta', async ({ browser }) => {
     const ctx = await browser.newContext({ ...{ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }, locale: 'es-PE' });
     const page = await ctx.newPage();
