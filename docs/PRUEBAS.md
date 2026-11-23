@@ -9,7 +9,7 @@ Ejecución del 12/10/2026 (Sprint 1): **38/38 pruebas unitarias y de API aprobad
 
 Ejecución del 20/11/2026 (Sprint 3, con HU13, HU11, HU12 y HU09): **85/85 pruebas unitarias y de API aprobadas** y **19/19 pruebas e2e aprobadas**.
 
-Ejecución del 22/11/2026 (Sprint 3, HU09 con IA): **93/93 pruebas unitarias y de API aprobadas** y **20/20 pruebas e2e aprobadas**.
+Ejecución del 22/11/2026 (Sprint 3, HU09 con IA y HU16): **99/99 pruebas unitarias y de API aprobadas** y **21/21 pruebas e2e aprobadas**.
 
 | CP | Historia | Caso de prueba | Prueba de API (`tests/api`) | Prueba e2e (`tests/e2e`) | Resultado |
 |---|---|---|---|---|---|
@@ -37,6 +37,7 @@ Ejecución del 22/11/2026 (Sprint 3, HU09 con IA): **93/93 pruebas unitarias y d
 | CP20 | HU09 | Interpretación de venta dictada (venta propuesta; nada se registra sin confirmar) | Prueba unitaria `voz` · CA1 | CP20 | Aprobado |
 | CP21 | HU09 | Producto no reconocido en el dictado (se elige a mano) | Prueba unitaria `voz` · CA2 | CP21 | Aprobado |
 | CP20b | HU09 | Nombre coloquial resuelto por la IA ("gaseosa amarilla" → Inca Kola) y lo que la IA no reconoce queda para elegir a mano | Pruebas unitarias `ia-sugerencias` e `ia-gemini` | CP20b | Aprobado |
+| CP34 | HU16 | "¿Quién me debe más?" responde con el dato correcto de la bodega del usuario; la IA solo usa funciones predefinidas y nunca ve datos de otra bodega | `rf09-asistente` · CP34 y CA2; prueba unitaria `ia-asistente` | CP34 | Aprobado |
 | CP24 | HU11 | Registro de venta al fiado (deuda exacta, sin redondeo; solo el dueño) | `rf06-fiados` · CP24 | CP24 | Aprobado |
 | CP25 | HU11 | Registro de pago de deuda e historial del cliente | `rf06-fiados` · CP25 | CP25 | Aprobado |
 | CP26 | HU12 | Recordatorio por WhatsApp con el número y el monto | `rf06-fiados` · CP26 y prueba unitaria `whatsapp` | CP26 | Aprobado |
@@ -67,6 +68,7 @@ Para comprobar que las pruebas no pasan "por defecto", se introdujeron defectos 
 | El enlace de WhatsApp se arma sin el código de país 51 (Sprint 3) | Prueba unitaria de HU12 falló |
 | El intérprete de voz no traduce "medio litro" a "500 ml" (Sprint 3) | 3 pruebas unitarias de HU09 fallaron |
 | La venta por voz se puede confirmar con un producto sin elegir (Sprint 3) | e2e CP21 falló |
+| El asistente no devuelve a Gemini el turno con la thoughtSignature (Sprint 3) | Prueba unitaria `ia-asistente` falló |
 
 ## Defectos encontrados durante el sprint
 

@@ -321,11 +321,11 @@ test.describe.serial('Sprint 1 · flujo completo', () => {
     const menu = page.getByRole('navigation', { name: 'Menú principal' }).first();
     await expect(menu.getByRole('link', { name: 'Vender' })).toBeVisible();
     await expect(menu.getByRole('link', { name: 'Stock' })).toBeVisible();
-    for (const oculto of ['Productos', 'Mercadería', 'Equipo', 'Ventas', 'Vencimientos', 'Fiados']) await expect(menu.getByRole('link', { name: oculto })).toHaveCount(0);
+    for (const oculto of ['Productos', 'Mercadería', 'Equipo', 'Ventas', 'Vencimientos', 'Fiados', 'Asistente']) await expect(menu.getByRole('link', { name: oculto })).toHaveCount(0);
     await captura(page, '13-panel-ayudante');
 
     // Escribir la dirección a mano tampoco abre las pantallas del dueño
-    for (const ruta of ['/app/productos', '/app/productos/nuevo', '/app/mercaderia', '/app/equipo', '/app/ventas', '/app/vencimientos', '/app/fiados', '/app/fiados/1']) {
+    for (const ruta of ['/app/productos', '/app/productos/nuevo', '/app/mercaderia', '/app/equipo', '/app/ventas', '/app/vencimientos', '/app/fiados', '/app/fiados/1', '/app/asistente']) {
       await page.goto(ruta);
       await expect(page).toHaveURL(/\/app\?restringido=1/);
     }
@@ -529,6 +529,37 @@ test.describe.serial('Sprint 1 · flujo completo', () => {
     await expect(page.getByRole('button', { name: 'Confirmar venta' })).toBeEnabled();
     await page.getByRole('button', { name: 'Vaciar la venta' }).click();
     await expect(page.getByTestId('venta-voz')).toHaveCount(0);
+  });
+
+  test('CP34 Asistente de consultas con IA (HU16)', async ({ page }) => {
+    const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false } });
+    const { data: bodega } = await admin.from('bodegas').select('id').eq('nombre', BODEGA).single();
+    const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima' }).format(new Date());
+    const { data: ventasHoy } = await admin.from('ventas').select('total_cobrado').eq('bodega_id', bodega!.id).gte('created_at', `${hoy}T00:00:00-05:00`);
+    const totalHoy = (ventasHoy ?? []).reduce((s, v) => s + Number(v.total_cobrado), 0);
+
+    await ingresar(page, DUENO.email, DUENO.password);
+    await page.getByRole('link', { name: /Asistente con IA/ }).click();
+    await expect(page).toHaveURL(/\/app\/asistente$/);
+
+    // CA1: "¿Quién me debe más?" → la IA pide la función "deudores" y responde con el dato real (CP24 y CP25 dejaron a Carmen con S/ 3.20)
+    await page.getByRole('button', { name: '¿Quién me debe más?' }).click();
+    const respuestas = page.getByTestId('respuesta-asistente');
+    await expect(respuestas.last()).toHaveText('Quien más te debe es Carmen Rojas, con S/ 3.20.');
+    await expect(page.getByTestId('consultas-asistente').last()).toHaveText('Datos consultados: cuaderno de fiados');
+
+    await page.getByLabel('Tu pregunta').fill('¿Cuánto vendí hoy?');
+    await page.getByRole('button', { name: 'Preguntar' }).click();
+    await expect(respuestas).toHaveCount(2);
+    await expect(respuestas.last()).toHaveText(`Vendiste S/ ${totalHoy.toFixed(2)} en ${ventasHoy!.length} ventas.`);
+
+    // Fuera de tema: no consulta nada
+    await page.getByLabel('Tu pregunta').fill('¿Qué clima hará mañana?');
+    await page.getByRole('button', { name: 'Preguntar' }).click();
+    await expect(respuestas).toHaveCount(3);
+    await expect(respuestas.last()).toContainText('Solo puedo responder preguntas sobre tu bodega');
+    await expect(page.getByTestId('consultas-asistente')).toHaveCount(2);
+    await page.screenshot({ path: 'docs/capturas/27-asistente.png', fullPage: true });
   });
 
   test('Vista móvil de la venta', async ({ browser }) => {

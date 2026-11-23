@@ -14,6 +14,7 @@ const ITEMS: Item[] = [
   { href: '/app/vencimientos', texto: 'Vencimientos', icono: 'M12 7v5l3 2M21 12a9 9 0 11-18 0 9 9 0 0118 0z', soloDueno: true, movil: false },
   { href: '/app/ventas', texto: 'Ventas', icono: 'M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6M9 16h4', soloDueno: true },
   { href: '/app/fiados', texto: 'Fiados', icono: 'M5 4h11a3 3 0 013 3v13H8a3 3 0 01-3-3zM5 17a3 3 0 013-3h11M9 8h6', soloDueno: true },
+  { href: '/app/asistente', texto: 'Asistente', icono: 'M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.4-4 8-9 8a9.8 9.8 0 01-4-.8L3 20l1.3-3.9A7.4 7.4 0 013 12c0-4.4 4-8 9-8s9 3.6 9 8z', soloDueno: true, movil: false },
   { href: '/app/mercaderia', texto: 'Mercadería', icono: 'M12 4v12m0 0l-4-4m4 4l4-4M4 20h16', soloDueno: true },
   { href: '/app/productos', texto: 'Productos', icono: 'M4 6h16M4 12h16M4 18h10', soloDueno: true, movil: false },
   { href: '/app/equipo', texto: 'Equipo', icono: 'M16 19v-1a4 4 0 00-4-4H7a4 4 0 00-4 4v1M9.5 10a3 3 0 100-6 3 3 0 000 6zM21 19v-1a4 4 0 00-3-3.9M16 4.1a3 3 0 010 5.8', soloDueno: true, movil: false },
