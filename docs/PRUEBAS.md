@@ -9,6 +9,8 @@ Ejecución del 12/10/2026 (Sprint 1): **38/38 pruebas unitarias y de API aprobad
 
 Ejecución del 20/11/2026 (Sprint 3, con HU13, HU11, HU12 y HU09): **85/85 pruebas unitarias y de API aprobadas** y **19/19 pruebas e2e aprobadas**.
 
+Ejecución del 22/11/2026 (Sprint 3, HU09 con IA): **93/93 pruebas unitarias y de API aprobadas** y **20/20 pruebas e2e aprobadas**.
+
 | CP | Historia | Caso de prueba | Prueba de API (`tests/api`) | Prueba e2e (`tests/e2e`) | Resultado |
 |---|---|---|---|---|---|
 | CHK-01 | HT01 | Checklist de configuración del entorno | — | — | Ver checklist abajo |
@@ -34,6 +36,7 @@ Ejecución del 20/11/2026 (Sprint 3, con HU13, HU11, HU12 y HU09): **85/85 prueb
 | CP19 | HU08 | Total vendido del día | `rf03-historial` · CP19 | CP19 | Aprobado |
 | CP20 | HU09 | Interpretación de venta dictada (venta propuesta; nada se registra sin confirmar) | Prueba unitaria `voz` · CA1 | CP20 | Aprobado |
 | CP21 | HU09 | Producto no reconocido en el dictado (se elige a mano) | Prueba unitaria `voz` · CA2 | CP21 | Aprobado |
+| CP20b | HU09 | Nombre coloquial resuelto por la IA ("gaseosa amarilla" → Inca Kola) y lo que la IA no reconoce queda para elegir a mano | Pruebas unitarias `ia-sugerencias` e `ia-gemini` | CP20b | Aprobado |
 | CP24 | HU11 | Registro de venta al fiado (deuda exacta, sin redondeo; solo el dueño) | `rf06-fiados` · CP24 | CP24 | Aprobado |
 | CP25 | HU11 | Registro de pago de deuda e historial del cliente | `rf06-fiados` · CP25 | CP25 | Aprobado |
 | CP26 | HU12 | Recordatorio por WhatsApp con el número y el monto | `rf06-fiados` · CP26 y prueba unitaria `whatsapp` | CP26 | Aprobado |
@@ -43,7 +46,9 @@ Ejecución del 20/11/2026 (Sprint 3, con HU13, HU11, HU12 y HU09): **85/85 prueb
 | CP30 | HU14 | Configuración de stock mínimo | `rf07-alertas` · CP30 | CP30 | Aprobado |
 | CP31 | HU14 | Alerta de stock bajo | `rf07-alertas` · CP31 | CP31 | Aprobado |
 
-Además, `tests/unit/validaciones.test.ts` tiene 25 pruebas unitarias de las reglas de los formularios (contraseña, precios, fechas en hora de Lima, cantidades enteras, mensajes de error, clientes y pagos de fiado); `tests/unit/alertas.test.ts` tiene 7 `tests/unit/whatsapp.test.ts` tiene 2 (enlace del recordatorio de HU12) y `tests/unit/voz.test.ts` tiene 10 (interpretación del dictado de HU09: presentaciones, cantidades a granel, productos ambiguos o no reconocidos).
+Además, `tests/unit/validaciones.test.ts` tiene 25 pruebas unitarias de las reglas de los formularios (contraseña, precios, fechas en hora de Lima, cantidades enteras, mensajes de error, clientes y pagos de fiado); `tests/unit/alertas.test.ts` tiene 7 `tests/unit/whatsapp.test.ts` tiene 2 (enlace del recordatorio de HU12) y `tests/unit/voz.test.ts` tiene 10 (interpretación del dictado de HU09: presentaciones, cantidades a granel, productos ambiguos o no reconocidos). `tests/unit/ia-gemini.test.ts` (4) prueba el cliente de Gemini con `fetch` simulado (clave en la cabecera, esquema JSON, reintento sin esquema y mensajes de error) y `tests/unit/ia-sugerencias.test.ts` (4) que la respuesta de la IA se valide contra el catálogo.
+
+**IA en las pruebas.** Las pruebas e2e y la CI no llaman a Gemini: `tests/e2e/gemini-simulado.mjs` simula la API (`generateContent`) con reglas fijas y exige lo mismo que la real (clave en `x-goog-api-key`, esquema JSON y la `thoughtSignature` en el historial de function calling). Así las pruebas no gastan cuota, no dependen de Internet y siempre dan el mismo resultado. La prueba con el Gemini real se hace a mano en la vista previa de Vercel.
 
 En la prueba e2e de HU09 el navegador de pruebas no tiene micrófono, así que se reemplaza el reconocedor de voz del navegador (Web Speech API) por uno simulado que entrega el texto dictado; el resto del flujo es el real.
 
