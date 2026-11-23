@@ -439,6 +439,77 @@ test.describe.serial('Sprint 1 · flujo completo', () => {
     await expect(page.getByText('Celular 912345678')).toBeVisible();
   });
 
+  test('CP20, CP21 Venta por voz (HU09)', async ({ page }) => {
+    // El navegador de pruebas no tiene micrófono: se reemplaza el reconocedor de voz del navegador por uno
+    // que "escucha" el texto de window.__dictado (igual que la Web Speech API: onresult y luego onend)
+    await page.addInitScript(() => {
+      type Evento = { resultIndex: number; results: unknown[] };
+      const w = window as unknown as { __dictado?: string; __idioma?: string; SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown };
+      class ReconocedorFalso {
+        lang = '';
+        interimResults = false;
+        continuous = false;
+        maxAlternatives = 1;
+        onresult: ((e: Evento) => void) | null = null;
+        onerror: ((e: { error: string }) => void) | null = null;
+        onend: (() => void) | null = null;
+        start() {
+          w.__idioma = this.lang;
+          setTimeout(() => {
+            this.onresult?.({ resultIndex: 0, results: [Object.assign([{ transcript: w.__dictado ?? '' }], { isFinal: true })] });
+            this.onend?.();
+          }, 200);
+        }
+        stop() {}
+        abort() {}
+      }
+      w.SpeechRecognition = ReconocedorFalso;
+      w.webkitSpeechRecognition = ReconocedorFalso;
+    });
+    const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false } });
+    const { data: bodega } = await admin.from('bodegas').select('id').eq('nombre', BODEGA).single();
+    const contarVentas = async () => (await admin.from('ventas').select('id', { count: 'exact', head: true }).eq('bodega_id', bodega!.id)).count;
+    const antes = await contarVentas();
+
+    await ingresar(page, DUENO.email, DUENO.password);
+    await page.goto('/app/vender');
+
+    // CP20: "dos Inca Kola de medio litro y un paquete de galletas" → venta propuesta con productos del catálogo
+    await page.evaluate(() => { (window as unknown as { __dictado: string }).__dictado = 'Dos Inca Kola de medio litro y un paquete de galletas'; });
+    await page.getByRole('button', { name: 'Vender por voz' }).click();
+    await expect(page.getByTestId('venta-voz')).toContainText('Escuché: «Dos Inca Kola de medio litro y un paquete de galletas»');
+    await expect(page.getByTestId('venta-voz')).toContainText('Nada se registra hasta que confirmes');
+    expect(await page.evaluate(() => (window as unknown as { __idioma: string }).__idioma)).toBe('es-PE');
+    await expect(page.getByLabel('Cantidad de Inca Kola 500 ml')).toHaveValue('2');
+    await expect(page.getByLabel('Cantidad de Galletas Soda Field')).toHaveValue('1');
+    await expect(page.getByTestId('carrito').getByRole('listitem')).toHaveCount(2);
+    await expect(page.getByTestId('venta-total')).toHaveText(/8\.20/);
+    await captura(page, '24-venta-voz');
+    expect(await contarVentas()).toBe(antes); // CA2: todavía no se registró nada
+    await page.getByRole('button', { name: 'Confirmar venta' }).click();
+    await expect(page.getByTestId('venta-ok')).toContainText(/Cobrado S\/\s8\.20 \(Efectivo\)/);
+    expect(await contarVentas()).toBe(antes! + 1);
+
+    // CP21: un producto que no se reconoce se elige a mano (aquí, escribiendo el pedido en lugar de dictarlo)
+    await page.getByText('¿Sin micrófono? Escribe el pedido').click();
+    await page.getByLabel('Escribe el pedido').fill('tres chizitos y medio kilo de arroz');
+    await page.getByRole('button', { name: 'Interpretar' }).click();
+    await expect(page.getByLabel('Cantidad de Arroz Costeño a granel')).toHaveValue('0.5');
+    const elegir = page.getByLabel('¿Qué producto es «chizitos»? (3)');
+    await expect(elegir).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Confirmar venta' })).toBeDisabled();
+    await captura(page, '25-venta-voz-elegir');
+    await elegir.selectOption({ label: 'Galletas Soda Field' });
+    await expect(page.getByLabel('Cantidad de Galletas Soda Field')).toHaveValue('3');
+    await expect(page.getByTestId('por-elegir')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Confirmar venta' })).toBeEnabled();
+
+    // Si se arrepiente, se vacía la venta y no se registra nada
+    await page.getByRole('button', { name: 'Vaciar la venta' }).click();
+    await expect(page.getByText('Toca un producto para agregarlo o véndelo por voz.')).toBeVisible();
+    expect(await contarVentas()).toBe(antes! + 1);
+  });
+
   test('Vista móvil de la venta', async ({ browser }) => {
     const ctx = await browser.newContext({ ...{ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }, locale: 'es-PE' });
     const page = await ctx.newPage();

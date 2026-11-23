@@ -2,15 +2,18 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useMemo, useState, useTransition } from 'react';
+import { useMemo, useRef, useState, useTransition } from 'react';
 import { Aviso } from '@/components/ui';
 import { totalACobrar } from '@/lib/dinero';
 import { cantidad as fmtCant, enSoles, NOMBRE_METODO, NOMBRE_UNIDAD } from '@/lib/formato';
 import { METODOS_PAGO, unidadFraccionable, type MetodoPago } from '@/lib/validaciones';
+import { interpretarDictado } from '@/lib/voz';
 import { registrarVenta } from './actions';
+import { Dictado } from './dictado';
 
 export type ProductoVenta = { id: number; nombre: string; unidad: string; precio: number; stock: number; categoria: string };
 type Linea = { producto: ProductoVenta; cantidad: string };
+type Pendiente = { clave: number; texto: string; cantidad: number; candidatos: number[] };
 export type ClienteFiado = { id: number; nombre: string };
 
 function redondear(n: number) {
@@ -34,6 +37,10 @@ export function VentaCliente({
   const [error, setError] = useState<string | null>(null);
   const [ultima, setUltima] = useState<{ ventaId: number; totalCobrado: number; metodo: MetodoPago; cliente?: string; deuda?: number } | null>(null);
   const [pendiente, startTransition] = useTransition();
+  // HU09: lo último que se dictó y lo que no se reconoció (hay que elegirlo a mano antes de confirmar)
+  const [escuchado, setEscuchado] = useState<{ texto: string; reconocidos: number } | null>(null);
+  const [porElegir, setPorElegir] = useState<Pendiente[]>([]);
+  const siguienteClave = useRef(1);
 
   const visibles = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
@@ -52,7 +59,7 @@ export function VentaCliente({
   const aCobrar = totalACobrar(total, metodo);
   const redondeo = redondear(total - aCobrar);
   const faltaCliente = metodo === 'fiado' && !clienteId;
-  const hayProblemas = detalle.some((d) => !d.valida || d.excede) || faltaCliente;
+  const hayProblemas = detalle.some((d) => !d.valida || d.excede) || faltaCliente || porElegir.length > 0;
   const metodos = METODOS_PAGO.filter((m) => m !== 'fiado' || puedeFiar);
 
   function agregar(p: ProductoVenta) {
@@ -64,6 +71,49 @@ export function VentaCliente({
       const actual = Number(ls[i].cantidad.replace(',', '.')) || 0;
       return ls.map((l, j) => (j === i ? { ...l, cantidad: String(Math.min(actual + 1, p.stock)) } : l));
     });
+  }
+
+  function sumar(p: ProductoVenta, cant: number) {
+    setLineas((ls) => {
+      const i = ls.findIndex((l) => l.producto.id === p.id);
+      if (i === -1) return [...ls, { producto: p, cantidad: String(cant) }];
+      const actual = Number(ls[i].cantidad.replace(',', '.')) || 0;
+      return ls.map((l, j) => (j === i ? { ...l, cantidad: String(Math.round((actual + cant) * 1000) / 1000) } : l));
+    });
+  }
+
+  // HU09 CA1: el dictado arma la venta propuesta; CA2: nada se registra hasta "Confirmar venta"
+  function aplicarDictado(texto: string) {
+    setUltima(null);
+    setError(null);
+    const items = interpretarDictado(texto, productos);
+    let reconocidos = 0;
+    const nuevos: Pendiente[] = [];
+    for (const item of items) {
+      const p = item.tipo === 'reconocido' ? productos.find((x) => x.id === item.productoId) : undefined;
+      if (p) {
+        sumar(p, item.cantidad);
+        reconocidos++;
+      } else {
+        nuevos.push({ clave: siguienteClave.current++, texto: item.texto, cantidad: item.cantidad, candidatos: item.tipo === 'no_reconocido' ? item.candidatos : [] });
+      }
+    }
+    setEscuchado({ texto, reconocidos });
+    setPorElegir((ps) => [...ps, ...nuevos]);
+  }
+
+  function elegir(clave: number, productoId: number) {
+    const pend = porElegir.find((x) => x.clave === clave);
+    const p = productos.find((x) => x.id === productoId);
+    if (!pend || !p) return;
+    sumar(p, pend.cantidad);
+    setPorElegir((ps) => ps.filter((x) => x.clave !== clave));
+  }
+
+  function vaciar() {
+    setLineas([]);
+    setPorElegir([]);
+    setEscuchado(null);
   }
 
   function cambiar(id: number, cantidad: string) {
@@ -101,6 +151,8 @@ export function VentaCliente({
         deuda: r.deuda,
       });
       setLineas([]);
+      setPorElegir([]);
+      setEscuchado(null);
       setMetodo('efectivo');
       setClienteId('');
       router.refresh();
@@ -110,6 +162,7 @@ export function VentaCliente({
   return (
     <div className="grid gap-6 pb-16 lg:grid-cols-[1fr_380px] lg:pb-0">
       <section aria-label="Productos">
+        <Dictado onDictado={aplicarDictado} />
         <input type="search" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="Buscar producto…"
           className="campo mb-3" aria-label="Buscar producto" />
         {productos.length === 0 ? (
@@ -160,8 +213,49 @@ export function VentaCliente({
           )}
           {error && <Aviso tipo="error"><span data-testid="venta-error">{error}</span></Aviso>}
 
+          {escuchado && (
+            <div className="rounded-xl border border-linea bg-papel px-4 py-3 text-sm" data-testid="venta-voz">
+              <p><span className="font-semibold">Escuché:</span> «{escuchado.texto}»</p>
+              <p className="mt-1 text-suave">
+                {porElegir.length > 0
+                  ? 'Elige abajo lo que no reconocí y luego toca Confirmar venta. Nada se registra hasta que confirmes.'
+                  : escuchado.reconocidos > 0
+                    ? 'Esta es la venta propuesta: revísala y toca Confirmar venta. Nada se registra hasta que confirmes.'
+                    : 'No reconocí productos del catálogo en lo que dijiste.'}
+              </p>
+            </div>
+          )}
+          {porElegir.map((pend) => {
+            const parecidos = productos.filter((p) => pend.candidatos.includes(p.id));
+            const otros = productos.filter((p) => !pend.candidatos.includes(p.id));
+            return (
+              <div key={pend.clave} className="space-y-2 rounded-xl border border-alerta/30 bg-alerta-clara px-4 py-3" data-testid="por-elegir">
+                <label htmlFor={`elegir-${pend.clave}`} className="block font-semibold text-alerta">
+                  ¿Qué producto es «{pend.texto}»? ({fmtCant(pend.cantidad)})
+                </label>
+                <div className="flex gap-2">
+                  <select id={`elegir-${pend.clave}`} className="campo" defaultValue=""
+                    onChange={(e) => e.target.value && elegir(pend.clave, Number(e.target.value))}>
+                    <option value="">Elige el producto…</option>
+                    {parecidos.length > 0 && (
+                      <optgroup label="Parecidos">
+                        {parecidos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                      </optgroup>
+                    )}
+                    <optgroup label={parecidos.length > 0 ? 'Otros productos' : 'Productos'}>
+                      {otros.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                    </optgroup>
+                  </select>
+                  <button type="button" className="btn btn-secundario shrink-0" onClick={() => setPorElegir((ps) => ps.filter((x) => x.clave !== pend.clave))}>
+                    Quitar
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+
           {detalle.length === 0 ? (
-            <p className="text-suave">Toca un producto para agregarlo.</p>
+            <p className="text-suave">Toca un producto para agregarlo o véndelo por voz.</p>
           ) : (
             <ul className="divide-y divide-linea" data-testid="carrito">
               {detalle.map((d) => (
@@ -236,6 +330,11 @@ export function VentaCliente({
             disabled={pendiente || detalle.length === 0 || hayProblemas}>
             {pendiente ? 'Registrando…' : 'Confirmar venta'}
           </button>
+          {(detalle.length > 0 || porElegir.length > 0) && (
+            <button type="button" className="w-full text-sm font-semibold text-suave hover:text-error" onClick={vaciar}>
+              Vaciar la venta
+            </button>
+          )}
         </div>
       </section>
     </div>
