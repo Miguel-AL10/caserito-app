@@ -89,10 +89,12 @@ function asistente(cuerpo, res) {
   if (r.id !== 'llamada-1') return error(res, 400, 'El id de la functionResponse no coincide');
   const datos = r.response?.resultado;
   let texto = 'Listo.';
-  if (r.name === 'deudores') texto = datos?.length ? `Quien más te debe es ${datos[0].nombre}, con S/ ${Number(datos[0].deuda).toFixed(2)}.` : 'Nadie te debe.';
+  const primero = datos?.deudores?.[0];
+  if (r.name === 'deudores') texto = primero ? `Quien más te debe es ${primero.nombre}, con S/ ${Number(primero.deuda).toFixed(2)}.` : 'Nadie te debe.';
   if (r.name === 'resumen_ventas') texto = `Vendiste S/ ${Number(datos?.total_vendido ?? 0).toFixed(2)} en ${datos?.cantidad_ventas ?? 0} ventas.`;
-  if (r.name === 'stock_bajo') texto = datos?.length ? `Te conviene reponer: ${datos.map((p) => p.nombre).join(', ')}.` : 'No hay productos con stock bajo.';
-  if (r.name === 'por_vencer') texto = datos?.length ? `Por vencer: ${datos.map((p) => p.producto).join(', ')}.` : 'No hay productos por vencer.';
+  if (r.name === 'stock_bajo') texto = datos?.productos?.length ? `Te conviene reponer: ${datos.productos.map((p) => p.nombre).join(', ')}.` : 'No hay productos con stock bajo.';
+  if (r.name === 'por_vencer') texto = datos?.por_vencer?.length ? `Por vencer: ${datos.por_vencer.map((p) => p.producto).join(', ')}.` : 'No hay productos por vencer.';
+  if (datos?.error) texto = `No pude consultar: ${datos.error}`;
   return responder(res, 200, conTexto(texto));
 }
 
