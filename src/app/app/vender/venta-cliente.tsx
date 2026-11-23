@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMemo, useState, useTransition } from 'react';
 import { Aviso } from '@/components/ui';
@@ -10,18 +11,28 @@ import { registrarVenta } from './actions';
 
 export type ProductoVenta = { id: number; nombre: string; unidad: string; precio: number; stock: number; categoria: string };
 type Linea = { producto: ProductoVenta; cantidad: string };
+export type ClienteFiado = { id: number; nombre: string };
 
 function redondear(n: number) {
   return Math.round(n * 100) / 100;
 }
 
-export function VentaCliente({ productos }: { productos: ProductoVenta[] }) {
+export function VentaCliente({
+  productos,
+  clientes = [],
+  puedeFiar = false,
+}: {
+  productos: ProductoVenta[];
+  clientes?: ClienteFiado[];
+  puedeFiar?: boolean;
+}) {
   const router = useRouter();
   const [busqueda, setBusqueda] = useState('');
   const [lineas, setLineas] = useState<Linea[]>([]);
   const [metodo, setMetodo] = useState<MetodoPago>('efectivo');
+  const [clienteId, setClienteId] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [ultima, setUltima] = useState<{ ventaId: number; totalCobrado: number; metodo: MetodoPago } | null>(null);
+  const [ultima, setUltima] = useState<{ ventaId: number; totalCobrado: number; metodo: MetodoPago; cliente?: string; deuda?: number } | null>(null);
   const [pendiente, startTransition] = useTransition();
 
   const visibles = useMemo(() => {
@@ -40,7 +51,9 @@ export function VentaCliente({ productos }: { productos: ProductoVenta[] }) {
   const total = redondear(detalle.reduce((s, d) => s + d.subtotal, 0));
   const aCobrar = totalACobrar(total, metodo);
   const redondeo = redondear(total - aCobrar);
-  const hayProblemas = detalle.some((d) => !d.valida || d.excede);
+  const faltaCliente = metodo === 'fiado' && !clienteId;
+  const hayProblemas = detalle.some((d) => !d.valida || d.excede) || faltaCliente;
+  const metodos = METODOS_PAGO.filter((m) => m !== 'fiado' || puedeFiar);
 
   function agregar(p: ProductoVenta) {
     setUltima(null);
@@ -73,15 +86,23 @@ export function VentaCliente({ productos }: { productos: ProductoVenta[] }) {
       const r = await registrarVenta(
         detalle.map((d) => ({ producto_id: d.producto.id, cantidad: d.cant })),
         metodo,
+        metodo === 'fiado' ? Number(clienteId) : undefined,
       );
       if (!r.ok) {
         setError(r.error);
         router.refresh();
         return;
       }
-      setUltima({ ventaId: r.ventaId, totalCobrado: r.totalCobrado, metodo: r.metodo });
+      setUltima({
+        ventaId: r.ventaId,
+        totalCobrado: r.totalCobrado,
+        metodo: r.metodo,
+        cliente: clientes.find((c) => String(c.id) === clienteId)?.nombre,
+        deuda: r.deuda,
+      });
       setLineas([]);
       setMetodo('efectivo');
+      setClienteId('');
       router.refresh();
     });
   }
@@ -131,7 +152,9 @@ export function VentaCliente({ productos }: { productos: ProductoVenta[] }) {
           {ultima && (
             <Aviso tipo="bien">
               <span data-testid="venta-ok">
-                Venta #{ultima.ventaId} registrada · Cobrado {enSoles(ultima.totalCobrado)} ({NOMBRE_METODO[ultima.metodo]})
+                {ultima.metodo === 'fiado'
+                  ? `Venta #${ultima.ventaId} registrada · Fiado a ${ultima.cliente ?? 'el cliente'}: ${enSoles(ultima.totalCobrado)}${ultima.deuda !== undefined ? `. Ahora debe ${enSoles(ultima.deuda)}` : ''}`
+                  : `Venta #${ultima.ventaId} registrada · Cobrado ${enSoles(ultima.totalCobrado)} (${NOMBRE_METODO[ultima.metodo]})`}
               </span>
             </Aviso>
           )}
@@ -167,11 +190,29 @@ export function VentaCliente({ productos }: { productos: ProductoVenta[] }) {
           <div>
             <label htmlFor="metodo" className="etiqueta">Método de pago</label>
             <select id="metodo" className="campo" value={metodo} onChange={(e) => setMetodo(e.target.value as MetodoPago)}>
-              {METODOS_PAGO.map((m) => (
+              {metodos.map((m) => (
                 <option key={m} value={m}>{NOMBRE_METODO[m]}</option>
               ))}
             </select>
           </div>
+
+          {metodo === 'fiado' && (
+            <div>
+              <label htmlFor="cliente" className="etiqueta">Cliente</label>
+              {clientes.length === 0 ? (
+                <p className="text-sm text-suave">
+                  Aún no tienes clientes. <Link href="/app/fiados" className="font-semibold text-marca underline">Agrégalo en Fiados</Link>.
+                </p>
+              ) : (
+                <select id="cliente" className="campo" value={clienteId} onChange={(e) => setClienteId(e.target.value)}>
+                  <option value="">Elige quién se lo lleva al fiado…</option>
+                  {clientes.map((c) => (
+                    <option key={c.id} value={c.id}>{c.nombre}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
 
           <div className="space-y-1 border-t border-linea pt-3">
             {redondeo > 0 && (
@@ -187,7 +228,7 @@ export function VentaCliente({ productos }: { productos: ProductoVenta[] }) {
               </>
             )}
             <div className="flex items-center justify-between text-xl font-bold">
-              <span>{metodo === 'efectivo' ? 'A cobrar' : 'Total'}</span>
+              <span>{metodo === 'efectivo' ? 'A cobrar' : metodo === 'fiado' ? 'Total al fiado' : 'Total'}</span>
               <span data-testid="venta-total">{enSoles(aCobrar)}</span>
             </div>
           </div>
