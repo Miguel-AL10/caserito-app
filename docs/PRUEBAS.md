@@ -9,7 +9,7 @@ Ejecución del 12/10/2026 (Sprint 1): **38/38 pruebas unitarias y de API aprobad
 
 Ejecución del 20/11/2026 (Sprint 3, con HU13, HU11, HU12 y HU09): **85/85 pruebas unitarias y de API aprobadas** y **19/19 pruebas e2e aprobadas**.
 
-Ejecución del 22/11/2026 (Sprint 3, HU09 con IA, HU16 y HU10): **105/105 pruebas unitarias y de API aprobadas** y **22/22 pruebas e2e aprobadas**.
+Ejecución del 23/11/2026 (Sprint 3, HU09 con IA, HU16 y HU10, con modelo de respaldo): **107/107 pruebas unitarias y de API aprobadas** y **22/22 pruebas e2e aprobadas**.
 
 | CP | Historia | Caso de prueba | Prueba de API (`tests/api`) | Prueba e2e (`tests/e2e`) | Resultado |
 |---|---|---|---|---|---|
