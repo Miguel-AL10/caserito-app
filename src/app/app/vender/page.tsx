@@ -1,9 +1,12 @@
 import { Encabezado } from '@/components/ui';
 import { requireContexto } from '@/lib/contexto';
+import { iaDisponible } from '@/lib/ia/gemini';
 import { createClient } from '@/lib/supabase/server';
 import { VentaCliente, type ProductoVenta } from './venta-cliente';
 
 export const metadata = { title: 'Vender' };
+// La consulta a la IA (HU09) puede tardar más que el límite por defecto de una función de Vercel
+export const maxDuration = 60;
 
 export default async function Vender() {
   const ctx = await requireContexto();
@@ -32,7 +35,7 @@ export default async function Vender() {
   return (
     <>
       <Encabezado titulo="Registrar venta" descripcion="El stock se descuenta del lote que vence primero." />
-      <VentaCliente productos={productos} clientes={clientes} puedeFiar={puedeFiar} />
+      <VentaCliente productos={productos} clientes={clientes} puedeFiar={puedeFiar} iaDisponible={iaDisponible()} />
     </>
   );
 }

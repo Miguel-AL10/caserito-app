@@ -3,12 +3,12 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMemo, useRef, useState, useTransition } from 'react';
-import { Aviso } from '@/components/ui';
+import { Aviso, Insignia } from '@/components/ui';
 import { totalACobrar } from '@/lib/dinero';
 import { cantidad as fmtCant, enSoles, NOMBRE_METODO, NOMBRE_UNIDAD } from '@/lib/formato';
 import { METODOS_PAGO, unidadFraccionable, type MetodoPago } from '@/lib/validaciones';
 import { interpretarDictado } from '@/lib/voz';
-import { registrarVenta } from './actions';
+import { registrarVenta, sugerirProductosIA } from './actions';
 import { Dictado } from './dictado';
 
 export type ProductoVenta = { id: number; nombre: string; unidad: string; precio: number; stock: number; categoria: string };
@@ -24,10 +24,12 @@ export function VentaCliente({
   productos,
   clientes = [],
   puedeFiar = false,
+  iaDisponible = false,
 }: {
   productos: ProductoVenta[];
   clientes?: ClienteFiado[];
   puedeFiar?: boolean;
+  iaDisponible?: boolean;
 }) {
   const router = useRouter();
   const [busqueda, setBusqueda] = useState('');
@@ -41,6 +43,11 @@ export function VentaCliente({
   const [escuchado, setEscuchado] = useState<{ texto: string; reconocidos: number } | null>(null);
   const [porElegir, setPorElegir] = useState<Pendiente[]>([]);
   const siguienteClave = useRef(1);
+  // HU09 con IA: Gemini propone los productos que las reglas no reconocieron; el usuario igual confirma la venta
+  const [consultandoIA, setConsultandoIA] = useState(false);
+  const [sugeridasIA, setSugeridasIA] = useState<{ texto: string; nombre: string }[]>([]);
+  const [porIA, setPorIA] = useState<number[]>([]);
+  const [avisoIA, setAvisoIA] = useState<string | null>(null);
 
   const visibles = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
@@ -59,7 +66,7 @@ export function VentaCliente({
   const aCobrar = totalACobrar(total, metodo);
   const redondeo = redondear(total - aCobrar);
   const faltaCliente = metodo === 'fiado' && !clienteId;
-  const hayProblemas = detalle.some((d) => !d.valida || d.excede) || faltaCliente || porElegir.length > 0;
+  const hayProblemas = detalle.some((d) => !d.valida || d.excede) || faltaCliente || porElegir.length > 0 || consultandoIA;
   const metodos = METODOS_PAGO.filter((m) => m !== 'fiado' || puedeFiar);
 
   function agregar(p: ProductoVenta) {
@@ -100,6 +107,37 @@ export function VentaCliente({
     }
     setEscuchado({ texto, reconocidos });
     setPorElegir((ps) => [...ps, ...nuevos]);
+    if (iaDisponible && nuevos.length > 0) void consultarIA(nuevos);
+  }
+
+  async function consultarIA(nuevos: Pendiente[]) {
+    setConsultandoIA(true);
+    setAvisoIA(null);
+    const r = await sugerirProductosIA(nuevos.map((n) => ({ clave: n.clave, texto: n.texto })));
+    setConsultandoIA(false);
+    if (!r.ok) {
+      setAvisoIA(`${r.error} Elige el producto a mano.`);
+      return;
+    }
+    const resueltas: { clave: number; texto: string; producto: ProductoVenta }[] = [];
+    for (const s of r.sugerencias) {
+      const pend = nuevos.find((n) => n.clave === s.clave);
+      const p = productos.find((x) => x.id === s.productoId);
+      if (pend && p) resueltas.push({ clave: pend.clave, texto: pend.texto, producto: p });
+    }
+    for (const x of resueltas) sumar(x.producto, nuevos.find((n) => n.clave === x.clave)!.cantidad);
+    const claves = new Set(resueltas.map((x) => x.clave));
+    setPorElegir((ps) => ps.filter((x) => !claves.has(x.clave)));
+    setSugeridasIA((prev) => [...prev, ...resueltas.map((x) => ({ texto: x.texto, nombre: x.producto.nombre }))]);
+    setPorIA((prev) => [...prev, ...resueltas.map((x) => x.producto.id)]);
+    const sinResolver = nuevos.filter((n) => !claves.has(n.clave));
+    if (sinResolver.length > 0) setAvisoIA(`La IA tampoco reconoció ${sinResolver.map((n) => `«${n.texto}»`).join(', ')}. Elígelo a mano.`);
+  }
+
+  function limpiarIA() {
+    setSugeridasIA([]);
+    setPorIA([]);
+    setAvisoIA(null);
   }
 
   function elegir(clave: number, productoId: number) {
@@ -114,6 +152,7 @@ export function VentaCliente({
     setLineas([]);
     setPorElegir([]);
     setEscuchado(null);
+    limpiarIA();
   }
 
   function cambiar(id: number, cantidad: string) {
@@ -153,6 +192,7 @@ export function VentaCliente({
       setLineas([]);
       setPorElegir([]);
       setEscuchado(null);
+      limpiarIA();
       setMetodo('efectivo');
       setClienteId('');
       router.refresh();
@@ -217,12 +257,25 @@ export function VentaCliente({
             <div className="rounded-xl border border-linea bg-papel px-4 py-3 text-sm" data-testid="venta-voz">
               <p><span className="font-semibold">Escuché:</span> «{escuchado.texto}»</p>
               <p className="mt-1 text-suave">
-                {porElegir.length > 0
-                  ? 'Elige abajo lo que no reconocí y luego toca Confirmar venta. Nada se registra hasta que confirmes.'
-                  : escuchado.reconocidos > 0
-                    ? 'Esta es la venta propuesta: revísala y toca Confirmar venta. Nada se registra hasta que confirmes.'
-                    : 'No reconocí productos del catálogo en lo que dijiste.'}
+                {consultandoIA
+                  ? 'Consultando a la IA los productos que no reconocí…'
+                  : porElegir.length > 0
+                    ? 'Elige abajo lo que no reconocí y luego toca Confirmar venta. Nada se registra hasta que confirmes.'
+                    : escuchado.reconocidos > 0 || sugeridasIA.length > 0
+                      ? 'Esta es la venta propuesta: revísala y toca Confirmar venta. Nada se registra hasta que confirmes.'
+                      : 'No reconocí productos del catálogo en lo que dijiste.'}
               </p>
+              {sugeridasIA.length > 0 && (
+                <ul className="mt-2 space-y-1" data-testid="sugerencias-ia">
+                  {sugeridasIA.map((x, i) => (
+                    <li key={i} className="flex items-start gap-2">
+                      <Insignia tono="marca">IA</Insignia>
+                      <span>Interpreté «{x.texto}» como <strong>{x.nombre}</strong>.</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {avisoIA && <p className="mt-2 font-medium text-alerta" data-testid="aviso-ia">{avisoIA}</p>}
             </div>
           )}
           {porElegir.map((pend) => {
@@ -261,7 +314,12 @@ export function VentaCliente({
               {detalle.map((d) => (
                 <li key={d.producto.id} className="py-3">
                   <div className="flex items-start justify-between gap-2">
-                    <span className="font-semibold">{d.producto.nombre}</span>
+                    <span className="font-semibold">
+                      {d.producto.nombre}
+                      {porIA.includes(d.producto.id) && (
+                        <span className="ml-2 align-middle" title="Sugerido por la IA a partir de lo que dictaste"><Insignia tono="marca">IA</Insignia></span>
+                      )}
+                    </span>
                     <span className="font-bold">{enSoles(d.subtotal)}</span>
                   </div>
                   <div className="mt-2 flex items-center gap-2">

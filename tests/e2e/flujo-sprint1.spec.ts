@@ -510,6 +510,27 @@ test.describe.serial('Sprint 1 · flujo completo', () => {
     expect(await contarVentas()).toBe(antes! + 1);
   });
 
+  test('CP20b Venta por voz con IA: nombres coloquiales (HU09)', async ({ page }) => {
+    await ingresar(page, DUENO.email, DUENO.password);
+    await page.goto('/app/vender');
+    await page.getByText('¿Sin micrófono? Escribe el pedido').click();
+    // Las reglas no entienden "gaseosa amarilla" ni "chizitos": se le pregunta a la IA (Gemini simulado)
+    await page.getByLabel('Escribe el pedido').fill('una gaseosa amarilla y dos chizitos');
+    await page.getByRole('button', { name: 'Interpretar' }).click();
+    await expect(page.getByTestId('sugerencias-ia')).toContainText('Interpreté «gaseosa amarilla» como Inca Kola 500 ml.');
+    await expect(page.getByLabel('Cantidad de Inca Kola 500 ml')).toHaveValue('1');
+    await expect(page.getByTestId('carrito').getByRole('listitem').filter({ hasText: 'Inca Kola 500 ml' })).toContainText('IA');
+    // Lo que la IA tampoco reconoce se sigue eligiendo a mano (CA2)
+    await expect(page.getByTestId('aviso-ia')).toContainText('La IA tampoco reconoció «chizitos»');
+    await expect(page.getByLabel('¿Qué producto es «chizitos»? (2)')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Confirmar venta' })).toBeDisabled();
+    await captura(page, '26-venta-voz-ia');
+    await page.getByTestId('por-elegir').getByRole('button', { name: 'Quitar' }).click();
+    await expect(page.getByRole('button', { name: 'Confirmar venta' })).toBeEnabled();
+    await page.getByRole('button', { name: 'Vaciar la venta' }).click();
+    await expect(page.getByTestId('venta-voz')).toHaveCount(0);
+  });
+
   test('Vista móvil de la venta', async ({ browser }) => {
     const ctx = await browser.newContext({ ...{ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }, locale: 'es-PE' });
     const page = await ctx.newPage();
