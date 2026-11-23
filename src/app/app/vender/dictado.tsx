@@ -23,6 +23,8 @@ type ConstructorReconocedor = new () => Reconocedor;
 
 function constructorReconocedor(): ConstructorReconocedor | undefined {
   const w = window as unknown as { SpeechRecognition?: ConstructorReconocedor; webkitSpeechRecognition?: ConstructorReconocedor };
+  // Brave expone la API pero no tiene servicio de voz: siempre falla con "network"
+  if ('brave' in navigator) return undefined;
   return w.SpeechRecognition ?? w.webkitSpeechRecognition;
 }
 
@@ -33,7 +35,7 @@ const ERRORES: Record<string, string> = {
   'service-not-allowed': 'Permite el uso del micrófono en el navegador para vender por voz.',
   'no-speech': 'No te escuché. Toca el micrófono e inténtalo otra vez.',
   'audio-capture': 'No se encontró un micrófono en este equipo.',
-  network: 'El reconocimiento de voz necesita conexión a internet.',
+  network: 'El reconocimiento de voz no respondió: necesita internet y no funciona en todos los navegadores (por ejemplo, Brave). Usa Chrome o escribe el pedido.',
 };
 
 function Microfono() {
@@ -52,6 +54,7 @@ export function Dictado({ onDictado }: { onDictado: (texto: string) => void }) {
   const [parcial, setParcial] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [escrito, setEscrito] = useState('');
+  const [mostrarEscrito, setMostrarEscrito] = useState(false);
   const reconocedor = useRef<Reconocedor | null>(null);
 
   useEffect(() => () => reconocedor.current?.abort(), []);
@@ -79,7 +82,9 @@ export function Dictado({ onDictado }: { onDictado: (texto: string) => void }) {
       setParcial(`${final}${interino}`.trim());
     };
     r.onerror = (e) => {
-      if (e.error !== 'aborted') setError(ERRORES[e.error] ?? 'No se pudo usar el micrófono. Puedes escribir el pedido.');
+      if (e.error === 'aborted') return;
+      setError(ERRORES[e.error] ?? 'No se pudo usar el micrófono. Puedes escribir el pedido.');
+      if (e.error !== 'no-speech') setMostrarEscrito(true);
     };
     r.onend = () => {
       setEscuchando(false);
@@ -134,6 +139,8 @@ export function Dictado({ onDictado }: { onDictado: (texto: string) => void }) {
           <p className="text-sm text-suave">Este navegador no reconoce la voz (usa Chrome o Safari). Puedes escribir el pedido:</p>
           {formularioEscrito}
         </div>
+      ) : mostrarEscrito ? (
+        formularioEscrito
       ) : (
         <details>
           <summary className="cursor-pointer text-sm font-semibold text-marca">¿Sin micrófono? Escribe el pedido</summary>

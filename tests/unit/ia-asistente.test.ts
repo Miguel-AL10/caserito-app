@@ -37,7 +37,7 @@ describe('HU16 · Asistente', () => {
     const primero = JSON.parse(fetchSimulado.mock.calls[0][1].body);
     expect(primero.tools[0].functionDeclarations.map((f: { name: string }) => f.name)).toContain('deudores');
     expect(primero.systemInstruction.parts[0].text).toContain('Hoy es 2026-11-22');
-    expect(primero.generationConfig).toBeUndefined(); // sin temperature ni parámetros obsoletos
+    expect(primero.generationConfig).toEqual({ thinkingConfig: { thinkingLevel: 'low' } }); // sin temperature (obsoleto)
 
     const segundo = JSON.parse(fetchSimulado.mock.calls[1][1].body);
     expect(segundo.contents.at(-2)).toEqual({ role: 'model', parts: [llamada] });
