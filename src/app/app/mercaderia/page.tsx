@@ -24,7 +24,8 @@ export default async function Mercaderia() {
   return (
     <div className="grid gap-8 lg:grid-cols-[1fr_1fr]">
       <section>
-        <Encabezado titulo="Ingresar mercadería" descripcion="Cada ingreso es un lote con su propia fecha de vencimiento." />
+        <Encabezado titulo="Ingresar mercadería" descripcion="Cada ingreso es un lote con su propia fecha de vencimiento."
+          accion={<Link href="/app/mercaderia/factura" className="btn btn-secundario">Cargar con foto de factura</Link>} />
         {productos?.length ? (
           <LoteForm productos={productos} />
         ) : (
