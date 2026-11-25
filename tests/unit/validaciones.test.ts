@@ -8,6 +8,11 @@ import {
   aNumero,
   hoyLima,
   validarAyudante,
+  validarCelular,
+  validarCliente,
+  validarDiasAviso,
+  normalizarCelular,
+  validarPago,
   validarItemsVenta,
   validarLote,
   validarProducto,
@@ -170,5 +175,53 @@ describe('Día de Lima para el historial (HU08)', () => {
     expect(esFechaValida('2026-11-06')).toBe(true);
     expect(esFechaValida('<script>')).toBe(false);
     expect(esFechaValida(undefined)).toBe(false);
+  });
+});
+
+describe('Días de aviso de vencimiento (HU13)', () => {
+  it('acepta enteros de 1 a 60', () => {
+    const r = validarDiasAviso(fd({ dias_aviso: '15' }));
+    expect(r.ok && r.data.dias_aviso_vencimiento).toBe(15);
+    expect(validarDiasAviso(fd({ dias_aviso: '1' })).ok).toBe(true);
+    expect(validarDiasAviso(fd({ dias_aviso: '60' })).ok).toBe(true);
+  });
+
+  it('rechaza vacío, cero, decimales y más de 60', () => {
+    for (const v of ['', '0', '2.5', '61', 'siete']) expect(validarDiasAviso(fd({ dias_aviso: v })).ok).toBe(false);
+  });
+});
+
+describe('Mensajes de merma (HU13)', () => {
+  it('muestra el motivo de negocio que devuelve la BD', () => {
+    const err = { code: '22023', message: 'El lote todavía no vence: no se puede registrar como merma', hint: 'LOTE_NO_VENCIDO' };
+    expect(mensajeBD(err, 'merma')).toBe(err.message);
+    expect(mensajeBD({ code: '42501', message: 'x', hint: 'NO_AUTORIZADO' }, 'merma')).toBe('No tienes permiso para realizar esta acción.');
+  });
+});
+
+describe('Clientes del cuaderno de fiados (HU11, HU12)', () => {
+  it('nombre obligatorio y celular opcional de 9 dígitos que empieza con 9', () => {
+    const r = validarCliente(fd({ nombre: 'Carmen Rojas', celular: '987 654 321' }));
+    expect(r.ok && r.data).toEqual({ nombre: 'Carmen Rojas', celular: '987654321' });
+    const sin = validarCliente(fd({ nombre: 'Pedro', celular: '' }));
+    expect(sin.ok && sin.data.celular).toBeNull();
+    expect(validarCliente(fd({ nombre: 'P', celular: '' })).ok).toBe(false);
+    expect(validarCliente(fd({ nombre: 'Pedro', celular: '812345678' })).ok).toBe(false);
+    expect(validarCelular(fd({ celular: '98765432' })).ok).toBe(false);
+  });
+
+  it('acepta el prefijo +51', () => {
+    expect(normalizarCelular('+51 987 654 321')).toBe('987654321');
+  });
+});
+
+describe('Pago de fiado (HU11)', () => {
+  it('monto mayor a cero, con céntimos y sin pasar la deuda', () => {
+    const r = validarPago(fd({ monto: '5,50', metodo_pago: 'yape' }), 10);
+    expect(r.ok && r.data).toEqual({ monto: 5.5, metodo_pago: 'yape' });
+    expect(validarPago(fd({ monto: '0', metodo_pago: 'efectivo' }), 10).ok).toBe(false);
+    expect(validarPago(fd({ monto: '1.555', metodo_pago: 'efectivo' }), 10).ok).toBe(false);
+    expect(validarPago(fd({ monto: '10.01', metodo_pago: 'efectivo' }), 10).ok).toBe(false);
+    expect(validarPago(fd({ monto: '5', metodo_pago: 'fiado' }), 10).ok).toBe(false); // un pago no puede ser fiado
   });
 });

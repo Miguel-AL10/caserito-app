@@ -1,13 +1,22 @@
 import { Encabezado } from '@/components/ui';
 import { requireContexto } from '@/lib/contexto';
+import { iaDisponible } from '@/lib/ia/gemini';
 import { createClient } from '@/lib/supabase/server';
 import { VentaCliente, type ProductoVenta } from './venta-cliente';
 
 export const metadata = { title: 'Vender' };
+// La consulta a la IA (HU09) puede tardar más que el límite por defecto de una función de Vercel
+export const maxDuration = 60;
 
 export default async function Vender() {
-  await requireContexto();
+  const ctx = await requireContexto();
+  const puedeFiar = ctx.rol === 'dueno';
   const supabase = await createClient();
+  // HU11: solo el dueño vende al fiado, a nombre de un cliente del cuaderno
+  const { data: clientesData } = puedeFiar
+    ? await supabase.from('v_clientes').select('id, nombre').order('nombre')
+    : { data: [] };
+  const clientes = (clientesData ?? []).map((c) => ({ id: c.id as number, nombre: c.nombre as string }));
   const { data } = await supabase
     .from('v_stock')
     .select('producto_id, nombre, unidad, precio_venta, stock_disponible, categoria')
@@ -26,7 +35,7 @@ export default async function Vender() {
   return (
     <>
       <Encabezado titulo="Registrar venta" descripcion="El stock se descuenta del lote que vence primero." />
-      <VentaCliente productos={productos} />
+      <VentaCliente productos={productos} clientes={clientes} puedeFiar={puedeFiar} iaDisponible={iaDisponible()} />
     </>
   );
 }

@@ -1,28 +1,53 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useMemo, useState, useTransition } from 'react';
-import { Aviso } from '@/components/ui';
+import { useMemo, useRef, useState, useTransition } from 'react';
+import { Aviso, Insignia } from '@/components/ui';
 import { totalACobrar } from '@/lib/dinero';
 import { cantidad as fmtCant, enSoles, NOMBRE_METODO, NOMBRE_UNIDAD } from '@/lib/formato';
 import { METODOS_PAGO, unidadFraccionable, type MetodoPago } from '@/lib/validaciones';
-import { registrarVenta } from './actions';
+import { interpretarDictado } from '@/lib/voz';
+import { registrarVenta, sugerirProductosIA } from './actions';
+import { Dictado } from './dictado';
 
 export type ProductoVenta = { id: number; nombre: string; unidad: string; precio: number; stock: number; categoria: string };
 type Linea = { producto: ProductoVenta; cantidad: string };
+type Pendiente = { clave: number; texto: string; cantidad: number; candidatos: number[] };
+export type ClienteFiado = { id: number; nombre: string };
 
 function redondear(n: number) {
   return Math.round(n * 100) / 100;
 }
 
-export function VentaCliente({ productos }: { productos: ProductoVenta[] }) {
+export function VentaCliente({
+  productos,
+  clientes = [],
+  puedeFiar = false,
+  iaDisponible = false,
+}: {
+  productos: ProductoVenta[];
+  clientes?: ClienteFiado[];
+  puedeFiar?: boolean;
+  iaDisponible?: boolean;
+}) {
   const router = useRouter();
   const [busqueda, setBusqueda] = useState('');
   const [lineas, setLineas] = useState<Linea[]>([]);
   const [metodo, setMetodo] = useState<MetodoPago>('efectivo');
+  const [clienteId, setClienteId] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [ultima, setUltima] = useState<{ ventaId: number; totalCobrado: number; metodo: MetodoPago } | null>(null);
+  const [ultima, setUltima] = useState<{ ventaId: number; totalCobrado: number; metodo: MetodoPago; cliente?: string; deuda?: number } | null>(null);
   const [pendiente, startTransition] = useTransition();
+  // HU09: lo último que se dictó y lo que no se reconoció (hay que elegirlo a mano antes de confirmar)
+  const [escuchado, setEscuchado] = useState<{ texto: string; reconocidos: number } | null>(null);
+  const [porElegir, setPorElegir] = useState<Pendiente[]>([]);
+  const siguienteClave = useRef(1);
+  // HU09 con IA: Gemini propone los productos que las reglas no reconocieron; el usuario igual confirma la venta
+  const [consultandoIA, setConsultandoIA] = useState(false);
+  const [sugeridasIA, setSugeridasIA] = useState<{ texto: string; nombre: string }[]>([]);
+  const [porIA, setPorIA] = useState<number[]>([]);
+  const [avisoIA, setAvisoIA] = useState<string | null>(null);
 
   const visibles = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
@@ -40,7 +65,9 @@ export function VentaCliente({ productos }: { productos: ProductoVenta[] }) {
   const total = redondear(detalle.reduce((s, d) => s + d.subtotal, 0));
   const aCobrar = totalACobrar(total, metodo);
   const redondeo = redondear(total - aCobrar);
-  const hayProblemas = detalle.some((d) => !d.valida || d.excede);
+  const faltaCliente = metodo === 'fiado' && !clienteId;
+  const hayProblemas = detalle.some((d) => !d.valida || d.excede) || faltaCliente || porElegir.length > 0 || consultandoIA;
+  const metodos = METODOS_PAGO.filter((m) => m !== 'fiado' || puedeFiar);
 
   function agregar(p: ProductoVenta) {
     setUltima(null);
@@ -51,6 +78,81 @@ export function VentaCliente({ productos }: { productos: ProductoVenta[] }) {
       const actual = Number(ls[i].cantidad.replace(',', '.')) || 0;
       return ls.map((l, j) => (j === i ? { ...l, cantidad: String(Math.min(actual + 1, p.stock)) } : l));
     });
+  }
+
+  function sumar(p: ProductoVenta, cant: number) {
+    setLineas((ls) => {
+      const i = ls.findIndex((l) => l.producto.id === p.id);
+      if (i === -1) return [...ls, { producto: p, cantidad: String(cant) }];
+      const actual = Number(ls[i].cantidad.replace(',', '.')) || 0;
+      return ls.map((l, j) => (j === i ? { ...l, cantidad: String(Math.round((actual + cant) * 1000) / 1000) } : l));
+    });
+  }
+
+  // HU09 CA1: el dictado arma la venta propuesta; CA2: nada se registra hasta "Confirmar venta"
+  function aplicarDictado(texto: string) {
+    setUltima(null);
+    setError(null);
+    const items = interpretarDictado(texto, productos);
+    let reconocidos = 0;
+    const nuevos: Pendiente[] = [];
+    for (const item of items) {
+      const p = item.tipo === 'reconocido' ? productos.find((x) => x.id === item.productoId) : undefined;
+      if (p) {
+        sumar(p, item.cantidad);
+        reconocidos++;
+      } else {
+        nuevos.push({ clave: siguienteClave.current++, texto: item.texto, cantidad: item.cantidad, candidatos: item.tipo === 'no_reconocido' ? item.candidatos : [] });
+      }
+    }
+    setEscuchado({ texto, reconocidos });
+    setPorElegir((ps) => [...ps, ...nuevos]);
+    if (iaDisponible && nuevos.length > 0) void consultarIA(nuevos);
+  }
+
+  async function consultarIA(nuevos: Pendiente[]) {
+    setConsultandoIA(true);
+    setAvisoIA(null);
+    const r = await sugerirProductosIA(nuevos.map((n) => ({ clave: n.clave, texto: n.texto })));
+    setConsultandoIA(false);
+    if (!r.ok) {
+      setAvisoIA(`${r.error} Elige el producto a mano.`);
+      return;
+    }
+    const resueltas: { clave: number; texto: string; producto: ProductoVenta }[] = [];
+    for (const s of r.sugerencias) {
+      const pend = nuevos.find((n) => n.clave === s.clave);
+      const p = productos.find((x) => x.id === s.productoId);
+      if (pend && p) resueltas.push({ clave: pend.clave, texto: pend.texto, producto: p });
+    }
+    for (const x of resueltas) sumar(x.producto, nuevos.find((n) => n.clave === x.clave)!.cantidad);
+    const claves = new Set(resueltas.map((x) => x.clave));
+    setPorElegir((ps) => ps.filter((x) => !claves.has(x.clave)));
+    setSugeridasIA((prev) => [...prev, ...resueltas.map((x) => ({ texto: x.texto, nombre: x.producto.nombre }))]);
+    setPorIA((prev) => [...prev, ...resueltas.map((x) => x.producto.id)]);
+    const sinResolver = nuevos.filter((n) => !claves.has(n.clave));
+    if (sinResolver.length > 0) setAvisoIA(`La IA tampoco reconoció ${sinResolver.map((n) => `«${n.texto}»`).join(', ')}. Elígelo a mano.`);
+  }
+
+  function limpiarIA() {
+    setSugeridasIA([]);
+    setPorIA([]);
+    setAvisoIA(null);
+  }
+
+  function elegir(clave: number, productoId: number) {
+    const pend = porElegir.find((x) => x.clave === clave);
+    const p = productos.find((x) => x.id === productoId);
+    if (!pend || !p) return;
+    sumar(p, pend.cantidad);
+    setPorElegir((ps) => ps.filter((x) => x.clave !== clave));
+  }
+
+  function vaciar() {
+    setLineas([]);
+    setPorElegir([]);
+    setEscuchado(null);
+    limpiarIA();
   }
 
   function cambiar(id: number, cantidad: string) {
@@ -73,15 +175,26 @@ export function VentaCliente({ productos }: { productos: ProductoVenta[] }) {
       const r = await registrarVenta(
         detalle.map((d) => ({ producto_id: d.producto.id, cantidad: d.cant })),
         metodo,
+        metodo === 'fiado' ? Number(clienteId) : undefined,
       );
       if (!r.ok) {
         setError(r.error);
         router.refresh();
         return;
       }
-      setUltima({ ventaId: r.ventaId, totalCobrado: r.totalCobrado, metodo: r.metodo });
+      setUltima({
+        ventaId: r.ventaId,
+        totalCobrado: r.totalCobrado,
+        metodo: r.metodo,
+        cliente: clientes.find((c) => String(c.id) === clienteId)?.nombre,
+        deuda: r.deuda,
+      });
       setLineas([]);
+      setPorElegir([]);
+      setEscuchado(null);
+      limpiarIA();
       setMetodo('efectivo');
+      setClienteId('');
       router.refresh();
     });
   }
@@ -89,6 +202,7 @@ export function VentaCliente({ productos }: { productos: ProductoVenta[] }) {
   return (
     <div className="grid gap-6 pb-16 lg:grid-cols-[1fr_380px] lg:pb-0">
       <section aria-label="Productos">
+        <Dictado onDictado={aplicarDictado} />
         <input type="search" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="Buscar producto…"
           className="campo mb-3" aria-label="Buscar producto" />
         {productos.length === 0 ? (
@@ -131,20 +245,81 @@ export function VentaCliente({ productos }: { productos: ProductoVenta[] }) {
           {ultima && (
             <Aviso tipo="bien">
               <span data-testid="venta-ok">
-                Venta #{ultima.ventaId} registrada · Cobrado {enSoles(ultima.totalCobrado)} ({NOMBRE_METODO[ultima.metodo]})
+                {ultima.metodo === 'fiado'
+                  ? `Venta #${ultima.ventaId} registrada · Fiado a ${ultima.cliente ?? 'el cliente'}: ${enSoles(ultima.totalCobrado)}${ultima.deuda !== undefined ? `. Ahora debe ${enSoles(ultima.deuda)}` : ''}`
+                  : `Venta #${ultima.ventaId} registrada · Cobrado ${enSoles(ultima.totalCobrado)} (${NOMBRE_METODO[ultima.metodo]})`}
               </span>
             </Aviso>
           )}
           {error && <Aviso tipo="error"><span data-testid="venta-error">{error}</span></Aviso>}
 
+          {escuchado && (
+            <div className="rounded-xl border border-linea bg-papel px-4 py-3 text-sm" data-testid="venta-voz">
+              <p><span className="font-semibold">Escuché:</span> «{escuchado.texto}»</p>
+              <p className="mt-1 text-suave">
+                {consultandoIA
+                  ? 'Consultando a la IA los productos que no reconocí…'
+                  : porElegir.length > 0
+                    ? 'Elige abajo lo que no reconocí y luego toca Confirmar venta. Nada se registra hasta que confirmes.'
+                    : escuchado.reconocidos > 0 || sugeridasIA.length > 0
+                      ? 'Esta es la venta propuesta: revísala y toca Confirmar venta. Nada se registra hasta que confirmes.'
+                      : 'No reconocí productos del catálogo en lo que dijiste.'}
+              </p>
+              {sugeridasIA.length > 0 && (
+                <ul className="mt-2 space-y-1" data-testid="sugerencias-ia">
+                  {sugeridasIA.map((x, i) => (
+                    <li key={i} className="flex items-start gap-2">
+                      <Insignia tono="marca">IA</Insignia>
+                      <span>Interpreté «{x.texto}» como <strong>{x.nombre}</strong>.</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {avisoIA && <p className="mt-2 font-medium text-alerta" data-testid="aviso-ia">{avisoIA}</p>}
+            </div>
+          )}
+          {porElegir.map((pend) => {
+            const parecidos = productos.filter((p) => pend.candidatos.includes(p.id));
+            const otros = productos.filter((p) => !pend.candidatos.includes(p.id));
+            return (
+              <div key={pend.clave} className="space-y-2 rounded-xl border border-alerta/30 bg-alerta-clara px-4 py-3" data-testid="por-elegir">
+                <label htmlFor={`elegir-${pend.clave}`} className="block font-semibold text-alerta">
+                  ¿Qué producto es «{pend.texto}»? ({fmtCant(pend.cantidad)})
+                </label>
+                <div className="flex gap-2">
+                  <select id={`elegir-${pend.clave}`} className="campo" defaultValue=""
+                    onChange={(e) => e.target.value && elegir(pend.clave, Number(e.target.value))}>
+                    <option value="">Elige el producto…</option>
+                    {parecidos.length > 0 && (
+                      <optgroup label="Parecidos">
+                        {parecidos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                      </optgroup>
+                    )}
+                    <optgroup label={parecidos.length > 0 ? 'Otros productos' : 'Productos'}>
+                      {otros.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                    </optgroup>
+                  </select>
+                  <button type="button" className="btn btn-secundario shrink-0" onClick={() => setPorElegir((ps) => ps.filter((x) => x.clave !== pend.clave))}>
+                    Quitar
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+
           {detalle.length === 0 ? (
-            <p className="text-suave">Toca un producto para agregarlo.</p>
+            <p className="text-suave">Toca un producto para agregarlo o véndelo por voz.</p>
           ) : (
             <ul className="divide-y divide-linea" data-testid="carrito">
               {detalle.map((d) => (
                 <li key={d.producto.id} className="py-3">
                   <div className="flex items-start justify-between gap-2">
-                    <span className="font-semibold">{d.producto.nombre}</span>
+                    <span className="font-semibold">
+                      {d.producto.nombre}
+                      {porIA.includes(d.producto.id) && (
+                        <span className="ml-2 align-middle" title="Sugerido por la IA a partir de lo que dictaste"><Insignia tono="marca">IA</Insignia></span>
+                      )}
+                    </span>
                     <span className="font-bold">{enSoles(d.subtotal)}</span>
                   </div>
                   <div className="mt-2 flex items-center gap-2">
@@ -167,11 +342,29 @@ export function VentaCliente({ productos }: { productos: ProductoVenta[] }) {
           <div>
             <label htmlFor="metodo" className="etiqueta">Método de pago</label>
             <select id="metodo" className="campo" value={metodo} onChange={(e) => setMetodo(e.target.value as MetodoPago)}>
-              {METODOS_PAGO.map((m) => (
+              {metodos.map((m) => (
                 <option key={m} value={m}>{NOMBRE_METODO[m]}</option>
               ))}
             </select>
           </div>
+
+          {metodo === 'fiado' && (
+            <div>
+              <label htmlFor="cliente" className="etiqueta">Cliente</label>
+              {clientes.length === 0 ? (
+                <p className="text-sm text-suave">
+                  Aún no tienes clientes. <Link href="/app/fiados" className="font-semibold text-marca underline">Agrégalo en Fiados</Link>.
+                </p>
+              ) : (
+                <select id="cliente" className="campo" value={clienteId} onChange={(e) => setClienteId(e.target.value)}>
+                  <option value="">Elige quién se lo lleva al fiado…</option>
+                  {clientes.map((c) => (
+                    <option key={c.id} value={c.id}>{c.nombre}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
 
           <div className="space-y-1 border-t border-linea pt-3">
             {redondeo > 0 && (
@@ -187,7 +380,7 @@ export function VentaCliente({ productos }: { productos: ProductoVenta[] }) {
               </>
             )}
             <div className="flex items-center justify-between text-xl font-bold">
-              <span>{metodo === 'efectivo' ? 'A cobrar' : 'Total'}</span>
+              <span>{metodo === 'efectivo' ? 'A cobrar' : metodo === 'fiado' ? 'Total al fiado' : 'Total'}</span>
               <span data-testid="venta-total">{enSoles(aCobrar)}</span>
             </div>
           </div>
@@ -195,6 +388,11 @@ export function VentaCliente({ productos }: { productos: ProductoVenta[] }) {
             disabled={pendiente || detalle.length === 0 || hayProblemas}>
             {pendiente ? 'Registrando…' : 'Confirmar venta'}
           </button>
+          {(detalle.length > 0 || porElegir.length > 0) && (
+            <button type="button" className="w-full text-sm font-semibold text-suave hover:text-error" onClick={vaciar}>
+              Vaciar la venta
+            </button>
+          )}
         </div>
       </section>
     </div>

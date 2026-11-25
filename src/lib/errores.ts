@@ -31,16 +31,19 @@ export function mensajeLogin(err: ErrorAuth): string {
 }
 
 /** Errores de la base de datos al guardar productos, lotes o ventas. */
-export function mensajeBD(err: ErrorBD, contexto: 'producto' | 'lote' | 'venta'): string {
+export function mensajeBD(err: ErrorBD, contexto: 'producto' | 'lote' | 'venta' | 'merma' | 'cliente' | 'pago'): string {
   if (!err) return 'Ocurrió un error inesperado.';
   if (err.code === '23505' && contexto === 'producto') return 'Ya existe un producto con ese nombre en tu bodega.';
+  if (err.code === '23505' && contexto === 'cliente') return 'Ya tienes un cliente con ese nombre.';
   if (err.code === '42501') return 'No tienes permiso para realizar esta acción.';
   // Mensajes de negocio lanzados por nuestros triggers y funciones (traen un "hint" conocido)
-  const conocidos = ['FECHA_VENCIDA', 'CANTIDAD_NO_ENTERA', 'STOCK_INSUFICIENTE', 'VENTA_VACIA', 'CANTIDAD_INVALIDA', 'PRODUCTO_NO_EXISTE'];
+  const conocidos = ['FECHA_VENCIDA', 'CANTIDAD_NO_ENTERA', 'STOCK_INSUFICIENTE', 'VENTA_VACIA', 'CANTIDAD_INVALIDA', 'PRODUCTO_NO_EXISTE',
+    'LOTE_NO_EXISTE', 'LOTE_NO_VENCIDO', 'LOTE_SIN_SALDO', 'CLIENTE_NO_EXISTE', 'CLIENTE_REQUERIDO', 'PAGO_INVALIDO', 'PAGO_MAYOR_A_DEUDA'];
   if (err.hint && conocidos.includes(err.hint) && err.message) return err.message;
   if (err.code === '23514') {
     if (contexto === 'producto') return 'Revisa los datos: el precio debe ser mayor a cero.';
     if (contexto === 'lote') return 'Revisa los datos del lote: la cantidad debe ser mayor a cero.';
+    if (contexto === 'cliente') return 'Revisa los datos: el celular debe tener 9 dígitos y empezar con 9.';
   }
   if (err.code === '23503') return 'El producto o la categoría elegidos no existen en tu bodega.';
   return contexto === 'venta' ? 'No se pudo registrar la venta. Inténtalo de nuevo.' : 'No se pudo guardar. Inténtalo de nuevo.';

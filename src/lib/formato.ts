@@ -39,4 +39,5 @@ export const NOMBRE_METODO: Record<string, string> = {
   plin: 'Plin',
   tarjeta: 'Tarjeta',
   otro: 'Otro',
+  fiado: 'Fiado',
 };

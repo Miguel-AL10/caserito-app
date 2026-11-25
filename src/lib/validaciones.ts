@@ -5,7 +5,12 @@
 export const UNIDADES = ['unidad', 'paquete', 'botella', 'lata', 'caja', 'bolsa', 'kg', 'litro'] as const;
 export type Unidad = (typeof UNIDADES)[number];
 
-export const METODOS_PAGO = ['efectivo', 'yape', 'plin', 'tarjeta', 'otro'] as const;
+/** Formas de cobro inmediato (también se usan para pagar una deuda de fiado). */
+export const METODOS_COBRO = ['efectivo', 'yape', 'plin', 'tarjeta', 'otro'] as const;
+export type MetodoCobro = (typeof METODOS_COBRO)[number];
+
+/** HU11: una venta puede quedar al fiado (solo el dueño la registra). */
+export const METODOS_PAGO = [...METODOS_COBRO, 'fiado'] as const;
 export type MetodoPago = (typeof METODOS_PAGO)[number];
 
 export const MIN_PASSWORD = 8;
@@ -177,4 +182,51 @@ export function validarItemsVenta(items: unknown): Resultado<ItemVenta[]> {
     limpios.push({ producto_id, cantidad });
   }
   return { ok: true, data: limpios };
+}
+
+// ---------------------------------------------------------------- HU13
+export const DIAS_AVISO_LIMITES = { min: 1, max: 60 } as const;
+
+/** HU13 CA1: días de anticipación para avisar los lotes por vencer (entero de 1 a 60). */
+export function validarDiasAviso(fd: FormData): Resultado<{ dias_aviso_vencimiento: number }> {
+  const n = aNumero(fd.get('dias_aviso'));
+  const { min, max } = DIAS_AVISO_LIMITES;
+  if (!Number.isInteger(n) || n < min || n > max)
+    return { ok: false, errores: { dias_aviso: `Escribe un número entero de días entre ${min} y ${max}.` } };
+  return { ok: true, data: { dias_aviso_vencimiento: n } };
+}
+
+// ---------------------------------------------------------------- HU11 y HU12
+export type DatosCliente = { nombre: string; celular: string | null };
+
+/** Celular peruano: 9 dígitos que empiezan con 9 (se aceptan espacios y el prefijo +51). */
+export function normalizarCelular(v: string): string {
+  return v.replace(/[\s-]/g, '').replace(/^\+?51(?=9\d{8}$)/, '');
+}
+
+export function validarCliente(fd: FormData): Resultado<DatosCliente> {
+  const nombre = texto(fd.get('nombre'));
+  const celular = normalizarCelular(texto(fd.get('celular')));
+  const e: Record<string, string> = {};
+  if (nombre.length < 2 || nombre.length > 100) e.nombre = 'Escribe el nombre del cliente (de 2 a 100 caracteres).';
+  if (celular && !/^9\d{8}$/.test(celular)) e.celular = 'El celular debe tener 9 dígitos y empezar con 9.';
+  return Object.keys(e).length ? { ok: false, errores: e } : { ok: true, data: { nombre, celular: celular || null } };
+}
+
+export function validarCelular(fd: FormData): Resultado<{ celular: string | null }> {
+  const celular = normalizarCelular(texto(fd.get('celular')));
+  if (celular && !/^9\d{8}$/.test(celular)) return { ok: false, errores: { celular: 'El celular debe tener 9 dígitos y empezar con 9.' } };
+  return { ok: true, data: { celular: celular || null } };
+}
+
+/** HU11 CA2: el pago es mayor a cero, con céntimos, y no supera la deuda. */
+export function validarPago(fd: FormData, deuda: number): Resultado<{ monto: number; metodo_pago: MetodoCobro }> {
+  const monto = aNumero(fd.get('monto'));
+  const metodo = texto(fd.get('metodo_pago')) as MetodoCobro;
+  const e: Record<string, string> = {};
+  if (!Number.isFinite(monto) || monto <= 0) e.monto = 'Escribe un monto mayor a cero.';
+  else if (decimales(monto) > 2) e.monto = 'El monto puede tener como máximo dos decimales.';
+  else if (monto > deuda) e.monto = `El pago no puede ser mayor que la deuda (S/ ${deuda.toFixed(2)}).`;
+  if (!METODOS_COBRO.includes(metodo)) e.metodo_pago = 'Elige cómo pagó.';
+  return Object.keys(e).length ? { ok: false, errores: e } : { ok: true, data: { monto, metodo_pago: metodo } };
 }
